@@ -949,10 +949,9 @@
                 self.deferredCompletion.reject.bind(self));
     };
     FileUpload.prototype.resumeInterruptedUpload = function () {
-        var self = this;
-        return new GetMultipartUploadParts(self)
+        return new ResumeInterruptedUpload(this)
             .send()
-            .then(self.uploadParts.bind(self));
+            .then(this.uploadParts.bind(this));
     };
     FileUpload.prototype.reuseS3Object = function (awsKey) {
         var self = this;
@@ -1282,15 +1281,15 @@
     };
 
     //http://docs.amazonwebservices.com/AmazonS3/latest/API/mpUploadListParts.html
-    function GetMultipartUploadParts(fileUpload) {
+    function ResumeInterruptedUpload(fileUpload) {
         SignedS3AWSRequestWithRetryLimit.call(this, fileUpload);
         this.updateRequest(this.setupRequest(0));
     }
-    GetMultipartUploadParts.prototype = Object.create(SignedS3AWSRequestWithRetryLimit.prototype);
-    GetMultipartUploadParts.prototype.constructor = GetMultipartUploadParts;
-    GetMultipartUploadParts.prototype.awsKey = undefined;
-    GetMultipartUploadParts.prototype.partNumberMarker = 0;
-    GetMultipartUploadParts.prototype.setupRequest = function (partNumberMarker) {
+    ResumeInterruptedUpload.prototype = Object.create(SignedS3AWSRequestWithRetryLimit.prototype);
+    ResumeInterruptedUpload.prototype.constructor = ResumeInterruptedUpload;
+    ResumeInterruptedUpload.prototype.awsKey = undefined;
+    ResumeInterruptedUpload.prototype.partNumberMarker = 0;
+    ResumeInterruptedUpload.prototype.setupRequest = function (partNumberMarker) {
         var msg = ['setupRequest() for uploadId:', this.fileUpload.uploadId, 'for part marker:', partNumberMarker].join(" ");
         l.d(msg);
 
@@ -1311,7 +1310,7 @@
         this.request = request;
         return request;
     };
-    GetMultipartUploadParts.prototype.success = function (xhr) {
+    ResumeInterruptedUpload.prototype.success = function (xhr) {
         if (xhr.status === 404) {
             // Success! Upload is no longer recognized, so there is nothing to fetch
             return this.rejectedSuccess('uploadId ', this.fileUpload.id, ' not found on S3.');
@@ -1572,10 +1571,9 @@
             }
             header_key_array.sort();
 
-            var self = this;
             header_key_array.forEach(function (header_key) {
-                x_amz_headers += (header_key + ':' + self.request.x_amz_headers[header_key] + '\n');
-            });
+                x_amz_headers += (header_key + ':' + this.request.x_amz_headers[header_key] + '\n');
+            }.bind(this));
 
             result = this.request.method + '\n' +
                 (this.request.md5_digest || '') + '\n' +

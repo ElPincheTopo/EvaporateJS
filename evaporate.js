@@ -1018,6 +1018,12 @@
         this.signer = new SigningClass(request, this.getPayload());
     };
     SignedS3AWSRequest.prototype.success = function () { return true; };
+    SignedS3AWSRequest.prototype.backOffWait = function () {
+        return (this.attempts === 1) ? 0 : 1000 * Math.min(
+            this.con.maxRetryBackoffSecs,
+            Math.pow(this.con.retryBackoffPower, this.attempts - 2)
+        );
+    };
     SignedS3AWSRequest.prototype.error =  function (reason) {
         if (this.errorExceptionStatus()) {
             return;
@@ -1033,10 +1039,7 @@
         this.fileUpload.setStatus(ERROR);
 
         var self = this,
-            backOffWait = (this.attempts === 1) ? 0 : 1000 * Math.min(
-                this.con.maxRetryBackoffSecs,
-                Math.pow(this.con.retryBackoffPower, this.attempts - 2)
-            );
+            backOffWait = this.backOffWait();
         this.attempts += 1;
 
         setTimeout(function () {
@@ -1052,18 +1055,6 @@
     };
     SignedS3AWSRequest.prototype.stringToSign = function () {
         return encodeURIComponent(this.signer.stringToSign());
-    };
-    SignedS3AWSRequest.prototype.makeSignParamsObject = function (params) {
-        var out = {};
-        for (var param in params) {
-            if (!params.hasOwnProperty(param)) { continue; }
-            if (typeof params[param] === 'function') {
-                out[param] = params[param]();
-            } else {
-                out[param] = params[param];
-            }
-        }
-        return out;
     };
     SignedS3AWSRequest.prototype.signResponse = function(payload, stringToSign, signatureDateTime) {
         var self = this;
@@ -1460,10 +1451,7 @@
         var backOffWait;
 
         if (this.part.status === ERROR) {
-            backOffWait = (this.attempts === 1) ? 0 : 1000 * Math.min(
-                this.con.maxRetryBackoffSecs,
-                Math.pow(this.con.retryBackoffPower, this.attempts - 2)
-            );
+            backOffWait = this.backOffWait();
 
             this.attempts += 1;
         } else {
@@ -1790,7 +1778,7 @@
                 var stringToSign = awsRequest.stringToSign(),
                     url = [con.signerUrl, '?to_sign=', stringToSign, '&datetime=', request.dateString].join('');
 
-                var signParams = awsRequest.makeSignParamsObject(fileUpload.signParams);
+                var signParams = AuthorizationMethod.makeSignParamsObject(fileUpload.signParams);
                 for (var param in signParams) {
                     if (!signParams.hasOwnProperty(param)) { continue; }
                     url += ('&' + encodeURIComponent(param) + '=' + encodeURIComponent(signParams[param]));
@@ -1821,7 +1809,7 @@
                 };
 
                 xhr.open('GET', url);
-                var signHeaders = awsRequest.makeSignParamsObject(con.signHeaders);
+                var signHeaders = AuthorizationMethod.makeSignParamsObject(con.signHeaders);
                 for (var header in signHeaders) {
                     if (!signHeaders.hasOwnProperty(header)) { continue; }
                     xhr.setRequestHeader(header, signHeaders[header])

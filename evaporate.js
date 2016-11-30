@@ -25,6 +25,7 @@
         HOURS_AGO,
         PENDING = 0, EVAPORATING = 2, COMPLETE = 3, PAUSED = 4, CANCELED = 5, ERROR = 10, ABORTED = 20, PAUSING = 30,
         PAUSED_STATUSES = [PAUSED, PAUSING],
+        ACTIVE_STATUSES = [PENDING, EVAPORATING, ERROR],
         ETAG_OF_0_LENGTH_BLOB = '"d41d8cd98f00b204e9800998ecf8427e"',
         PARTS_MONITOR_INTERVAL_MS = 2 * 60 * 1000,
         IMMUTABLE_OPTIONS = [
@@ -280,7 +281,7 @@
         for (var key in this.pendingFiles) {
             if (this.pendingFiles.hasOwnProperty(key)) {
                 var file = this.pendingFiles[key];
-                if ([PENDING, EVAPORATING, ERROR].indexOf(file.status) > -1) {
+                if (ACTIVE_STATUSES.indexOf(file.status) > -1) {
                     promises.push(file.stop());
                 }
             }
@@ -310,10 +311,8 @@
         for (var key in this.pendingFiles) {
             if (this.pendingFiles.hasOwnProperty(key)) {
                 var file = this.pendingFiles[key];
-                if ([PENDING, EVAPORATING, ERROR].indexOf(file.status) > -1) {
-                    promises.push(file.pause(force));
-                    removeAtIndex(this.filesInProcess, file);
-                    removeAtIndex(this.queuedFiles, file);
+                if (ACTIVE_STATUSES.indexOf(file.status) > -1) {
+                    this._pause(file, force, promises);
                 }
             }
         }
@@ -328,11 +327,14 @@
             promises.push(Promise.reject('Cannot pause a file that is already paused.'));
         }
         if (!promises.length) {
-            promises.push(file.pause(force));
-            removeAtIndex(this.filesInProcess, file);
-            removeAtIndex(this.queuedFiles, file);
+            this._pause(file, force, promises);
         }
         return Promise.all(promises);
+    };
+    Evaporate.prototype._pause = function(fileUpload, force, promises) {
+      promises.push(fileUpload.pause(force));
+      removeAtIndex(this.filesInProcess, fileUpload);
+      removeAtIndex(this.queuedFiles, fileUpload);
     };
     Evaporate.prototype.resume = function (id) {
         return typeof id === 'undefined' ? this._resumeAll() : this._resumeOne(id);
@@ -1199,6 +1201,11 @@
             return true;
         }
     };
+    SignedS3AWSRequestWithRetryLimit.prototype.rejectedSuccess = function () {
+        var reason = Array.prototype.slice.call(arguments, 1).join("");
+        this.awsDeferred.reject(reason);
+        return false;
+    };
 
     // see: http://docs.amazonwebservices.com/AmazonS3/latest/API/mpUploadInitiate.html
     function InitiateMultipartUpload(fileUpload, awsKey) {
@@ -1269,9 +1276,7 @@
     ReuseS3Object.prototype.success = function (xhr) {
         var eTag = xhr.getResponseHeader('Etag');
         if (eTag !== this.fileUpload.eTag) {
-            var msg = ['uploadId ', this.fileUpload.id, ' found on S3 but the Etag doesn\'t match.'].join('');
-            this.awsDeferred.reject(msg);
-            return false;
+            return this.rejectedSuccess('uploadId ', this.fileUpload.id, ' found on S3 but the Etag doesn\'t match.');
         }
         return true;
     };
@@ -1309,9 +1314,7 @@
     GetMultipartUploadParts.prototype.success = function (xhr) {
         if (xhr.status === 404) {
             // Success! Upload is no longer recognized, so there is nothing to fetch
-            var msg = ['uploadId ', this.fileUpload.id, ' not found on S3.'].join('');
-            this.awsDeferred.reject(msg);
-            return false;
+            return this.rejectedSuccess('uploadId ', this.fileUpload.id, ' not found on S3.');
         }
 
         var listPartsResult = this.fileUpload.listPartsSuccess(this, xhr.responseText);
